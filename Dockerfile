@@ -20,6 +20,11 @@ RUN git clone https://github.com/yl4579/StyleTTS2.git .
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# --- VIKTIG NYTT STEG ---
+# 4b. Kompiler monotonic_align (Fix for ModuleNotFoundError)
+# Dette må gjøres etter pip install, da det krever Cython.
+RUN cd monotonic_align && python setup.py build_ext --inplace
+
 # 5. Kopier vår kildekode inn i containeren
 COPY src/ ./src/
 COPY configs/ ./configs/
