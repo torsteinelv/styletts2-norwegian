@@ -6,6 +6,8 @@ RUN apt-get update && apt-get install -y \
     libsndfile1 \
     espeak-ng \
     build-essential \
+    wget \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # 2. Sett arbeidsmappe
