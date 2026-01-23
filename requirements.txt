@@ -11,3 +11,6 @@ unidecode
 huggingface_hub
 datasets==2.19.0
 nltk
+munch
+einops
+typing_extensions
