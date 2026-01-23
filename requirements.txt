@@ -1,0 +1,13 @@
+torch>=2.1.0
+torchaudio>=2.1.0
+scipy
+librosa
+phonemizer
+transformers
+accelerate
+matplotlib
+pyyaml
+munidecode
+huggingface_hub
+datasets
+nltk
