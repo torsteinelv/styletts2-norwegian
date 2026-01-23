@@ -2,7 +2,7 @@ import os
 from huggingface_hub import HfApi, login
 
 def upload_model():
-    print("☁️ Laster opp modell til Hugging Face...")
+    print("☁️ Laster opp modell OG prøver til Hugging Face...")
     
     hf_token = os.getenv("HF_TOKEN")
     hf_repo = os.getenv("HF_REPO")
@@ -14,24 +14,27 @@ def upload_model():
     login(token=hf_token)
     api = HfApi()
     
+    # 1. Last opp Modellen (Selve hjernen)
     MODEL_DIR = "Models/NorskStyle"
-    
-    # Finn siste epoch (beste modell)
-    checkpoints = [f for f in os.listdir(MODEL_DIR) if f.endswith(".pth")]
-    if not checkpoints:
-        print("❌ Ingen modellfiler funnet!")
-        return
-        
-    # Vi laster opp hele mappen
-    print(f"Laster opp {MODEL_DIR} til {hf_repo}...")
-    
+    print(f"Laster opp modell fra {MODEL_DIR}...")
     api.upload_folder(
         folder_path=MODEL_DIR,
         repo_id=hf_repo,
-        commit_message="Upload Norwegian StyleTTS2 Model"
+        commit_message="Upload Trained Model"
     )
     
-    print("🎉 Opplasting ferdig!")
+    # 2. Last opp Lydprøver (Beviset)
+    SAMPLES_DIR = "samples"
+    if os.path.exists(SAMPLES_DIR):
+        print(f"Laster opp lydprøver fra {SAMPLES_DIR}...")
+        api.upload_folder(
+            folder_path=SAMPLES_DIR,
+            path_in_repo="samples", # Legg dem i en undermappe på HF
+            repo_id=hf_repo,
+            commit_message="Add audio samples"
+        )
+    
+    print("🎉 Alt lastet opp! Sjekk 'samples'-mappen på Hugging Face.")
 
 if __name__ == "__main__":
     upload_model()
