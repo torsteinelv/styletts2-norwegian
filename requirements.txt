@@ -9,5 +9,5 @@ matplotlib
 pyyaml
 unidecode
 huggingface_hub
-datasets
+datasets==2.19.0
 nltk
