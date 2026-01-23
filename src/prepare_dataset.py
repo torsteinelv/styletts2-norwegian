@@ -6,9 +6,10 @@ from datasets import load_dataset
 from tqdm import tqdm
 import random
 import sys
-import urllib.request
-import zipfile
 import shutil
+import yaml
+import json
+from huggingface_hub import hf_hub_download
 
 # --- KONFIGURASJON ---
 TARGET_SPEAKER = "Anniken Huitfeldt" 
@@ -18,12 +19,52 @@ OUTPUT_WAV_DIR = "/app/Data/wavs"
 TRAIN_LIST_FILE = "/app/Data/train_list.txt"
 VAL_LIST_FILE = "/app/Data/val_list.txt"
 UTILS_DIR = "/app/Utils"
+TEXT_UTILS_FILE = "/app/text_utils.py"  # Filen som styrer uttale
 
 # StyleTTS2 standard
 SAMPLE_RATE = 24000
 
+def patch_text_utils_to_norwegian():
+    """
+    Dette er den viktige hacken!
+    Vi endrer kildekoden til StyleTTS2 slik at den bruker NORSK lydskrift (phonemizer),
+    ikke engelsk. Uten dette høres norsken ut som engelsk gibberish.
+    """
+    print("🇳🇴 Patcher text_utils.py til å bruke norsk språk...")
+    
+    if not os.path.exists(TEXT_UTILS_FILE):
+        print(f"⚠️ Fant ikke {TEXT_UTILS_FILE}, kan ikke patche språk!")
+        return
+
+    try:
+        with open(TEXT_UTILS_FILE, 'r') as f:
+            code = f.read()
+        
+        # Sjekk om den allerede er patchet
+        if "language='nb'" in code:
+            print("   Allerede patchet til norsk.")
+            return
+
+        # Bytt ut engelsk standard med norsk bokmål ('nb')
+        # Vi ser etter phonemize-funksjonen som vanligvis har language='en-us'
+        new_code = code.replace("language='en-us'", "language='nb'")
+        
+        # Hvis koden bruker 'en', bytt den også
+        new_code = new_code.replace("language='en'", "language='nb'")
+
+        with open(TEXT_UTILS_FILE, 'w') as f:
+            f.write(new_code)
+            
+        print("✅ Suksess! Modellen vil nå snakke norsk (nb).")
+        
+    except Exception as e:
+        print(f"❌ Feil under patching av norsk språk: {e}")
+
 def prepare_data():
     print(f"🚀 Starter forberedelse for stemmen: {TARGET_SPEAKER}")
+    
+    # 1. Kjør språk-patchen først av alt
+    patch_text_utils_to_norwegian()
     
     os.makedirs(OUTPUT_WAV_DIR, exist_ok=True)
     os.makedirs("/app/Data", exist_ok=True)
@@ -49,7 +90,8 @@ def prepare_data():
     
     print("⏳ Laster ned, analyserer og konverterer lydfiler...")
     
-    MAX_DURATION_SECONDS = 14400 # 4 timer
+    # Øker til 6 timer max for å være sikker på at vi får nok
+    MAX_DURATION_SECONDS = 21600 
     
     for i, row in enumerate(tqdm(ds)):
         if total_duration > MAX_DURATION_SECONDS: 
@@ -109,40 +151,40 @@ def prepare_data():
         
     print(f"📝 Lagret {len(train_data)} linjer til train_list.txt")
     
-    # --- FIX: LAST NED ORIGINAL PL-BERT FRA HUGGING FACE ---
-    # Vi bruker yl4579 (skaperen av StyleTTS2) sitt HF repo. Det er trygt.
-    
+    # --- LAST NED PAPERCUP-MODELL (Multilingual) ---
     plbert_dir = os.path.join(UTILS_DIR, "PLBERT")
     os.makedirs(plbert_dir, exist_ok=True)
     
-    # Dette er de to filene som lå inni bert.zip
-    files_to_download = {
-        "config.json": "https://huggingface.co/yl4579/StyleTTS2-LibriTTS/resolve/main/Utils/PLBERT/config.json",
-        "step_1000000.t7": "https://huggingface.co/yl4579/StyleTTS2-LibriTTS/resolve/main/Utils/PLBERT/step_1000000.t7"
-    }
+    print("📥 Laster ned Papercup Multilingual PL-BERT (Norsk støtte)...")
     
-    print("📥 Laster ned PL-BERT filer fra Hugging Face (ingen zip-tull)...")
-    
-    for filename, url in files_to_download.items():
-        file_path = os.path.join(plbert_dir, filename)
-        
-        # Sjekk størrelse for å se om vi har en korrupt fil (viktig!)
-        if os.path.exists(file_path):
-            if os.path.getsize(file_path) < 1000: # Hvis filen er mistenkelig liten (f.eks feilmelding)
-                print(f"   ⚠️  Filen {filename} ser ødelagt ut. Laster ned på nytt.")
-                os.remove(file_path)
-        
-        if not os.path.exists(file_path):
-            print(f"   Laster ned {filename}...")
-            try:
-                urllib.request.urlretrieve(url, file_path)
-            except Exception as e:
-                print(f"❌ Feil ved nedlasting av {filename}: {e}")
-                sys.exit(1)
-        else:
-            print(f"   {filename} er allerede på plass.")
+    try:
+        # Config (YAML -> JSON konvertering for sikkerhets skyld)
+        yml_path = hf_hub_download(repo_id="papercup-ai/multilingual-pl-bert", filename="config.yml")
+        local_yml_path = os.path.join(plbert_dir, "config.yml")
+        shutil.copy(yml_path, local_yml_path)
 
-    print("✅ PL-BERT installert korrekt!")
+        with open(local_yml_path, 'r') as f_yml:
+            config_data = yaml.safe_load(f_yml)
+        with open(os.path.join(plbert_dir, "config.json"), 'w') as f_json:
+            json.dump(config_data, f_json, indent=4)
+        
+        # Token Maps (KRITISK)
+        token_path = hf_hub_download(repo_id="papercup-ai/multilingual-pl-bert", filename="token_maps.pkl")
+        shutil.copy(token_path, os.path.join(plbert_dir, "token_maps.pkl"))
+
+        # Model Checkpoint (rename til det koden forventer)
+        model_path = hf_hub_download(repo_id="papercup-ai/multilingual-pl-bert", filename="step_1100000.t7")
+        shutil.copy(model_path, os.path.join(plbert_dir, "step_1000000.t7"))
+        
+        # Util.py (Fix)
+        util_path = hf_hub_download(repo_id="papercup-ai/multilingual-pl-bert", filename="util.py")
+        shutil.copy(util_path, os.path.join(plbert_dir, "util.py"))
+
+        print("✅ PL-BERT (Papercup Multilingual) installert korrekt!")
+        
+    except Exception as e:
+        print(f"❌ Feil ved nedlasting fra Hugging Face: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     prepare_data()
