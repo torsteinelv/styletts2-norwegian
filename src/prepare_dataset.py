@@ -11,7 +11,6 @@ import zipfile
 import shutil
 
 # --- KONFIGURASJON ---
-# Endre denne hvis du vil bytte person.
 TARGET_SPEAKER = "Anniken Huitfeldt" 
 
 # Stier inne i Docker-containeren
@@ -26,7 +25,6 @@ SAMPLE_RATE = 24000
 def prepare_data():
     print(f"🚀 Starter forberedelse for stemmen: {TARGET_SPEAKER}")
     
-    # Lag mapper hvis de ikke finnes
     os.makedirs(OUTPUT_WAV_DIR, exist_ok=True)
     os.makedirs("/app/Data", exist_ok=True)
     os.makedirs(UTILS_DIR, exist_ok=True)
@@ -34,7 +32,6 @@ def prepare_data():
     print("⏳ Kobler til NPSC-datasettet (Streaming)...")
     
     try:
-        # trust_remote_code=True er nødvendig for NPSC
         ds = load_dataset(
             "NbAiLab/NPSC", 
             "16K_mp3_bokmaal", 
@@ -44,7 +41,6 @@ def prepare_data():
         )
     except Exception as e:
         print(f"❌ Kunne ikke laste datasett: {e}")
-        print("   Tips: Sjekk at 'datasets==2.19.0' er i requirements.txt")
         sys.exit(1)
     
     data_entries = []
@@ -52,58 +48,39 @@ def prepare_data():
     processed_count = 0
     
     print("⏳ Laster ned, analyserer og konverterer lydfiler...")
-    print("   (Dette kan ta litt tid før fremdriftsbaren starter ordentlig)")
-
-    # Vi setter en maks grense (sekunder) for å ikke fylle disken helt
-    MAX_DURATION_SECONDS = 14400 # 4 timer (mer enn nok)
+    
+    MAX_DURATION_SECONDS = 14400 # 4 timer
     
     for i, row in enumerate(tqdm(ds)):
         if total_duration > MAX_DURATION_SECONDS: 
-            print("🛑 Har nok data! Stopper nedlasting.")
             break
             
-        # Sjekk om det er riktig person
         if row.get("speaker_name") != TARGET_SPEAKER:
             continue
             
-        # FIX: Manuell utregning av lengde (unngår KeyError: 'duration')
         try:
             audio_data = row["audio"]
             audio_array = audio_data["array"]
             orig_sr = audio_data["sampling_rate"]
-            
-            # Antall samples / Samplerate = Sekunder
             duration_seconds = len(audio_array) / orig_sr
-            
-        except Exception as e:
-            continue # Hopp over korrupte rader
+        except Exception:
+            continue 
 
-        # Filtrer vekk støy (veldig korte) og monologer (veldig lange)
-        # StyleTTS2 trener best på klipp mellom 1.5 og 12 sekunder.
         if duration_seconds < 1.5 or duration_seconds > 12.0:
             continue
             
-        # --- AUDIO PROSESSERING ---
-        
-        # Resample til 24kHz (StyleTTS2 krav)
         if orig_sr != SAMPLE_RATE:
             audio_array = librosa.resample(audio_array, orig_sr=orig_sr, target_sr=SAMPLE_RATE)
             
-        # Normaliser volum (viktig for jevn lyd!)
         max_val = np.max(np.abs(audio_array))
         if max_val > 0:
             audio_array = audio_array / max_val
         
-        # Lagre fil
         filename = f"{processed_count:05d}.wav"
         filepath = os.path.join(OUTPUT_WAV_DIR, filename)
         sf.write(filepath, audio_array, SAMPLE_RATE)
         
-        # --- TEKST PROSESSERING ---
-        # Fjern '|' siden StyleTTS2 bruker det som separator
         text = row["text"].replace("|", "").strip()
-        
-        # Format: "filnavn.wav | tekst | speaker_id"
         entry = f"{filename}|{text}|0"
         data_entries.append(entry)
         
@@ -119,11 +96,7 @@ def prepare_data():
 
     print(f"✅ Ferdig! Totalt {len(data_entries)} klipp ({total_duration/60:.1f} minutter).")
     
-    # --- DATA SPLIT (Train/Val) ---
-    print("✂️ Splitter i Trening og Validering...")
     random.shuffle(data_entries)
-    
-    # 95% trening, 5% validering
     split_idx = int(len(data_entries) * 0.95)
     train_data = data_entries[:split_idx]
     val_data = data_entries[split_idx:]
@@ -136,42 +109,40 @@ def prepare_data():
         
     print(f"📝 Lagret {len(train_data)} linjer til train_list.txt")
     
-    # --- LAST NED PL-BERT (MED USER-AGENT FIX) ---
-    bert_config = os.path.join(UTILS_DIR, "PLBERT", "config.json")
+    # --- FIX: LAST NED ORIGINAL PL-BERT FRA HUGGING FACE ---
+    # Vi bruker yl4579 (skaperen av StyleTTS2) sitt HF repo. Det er trygt.
     
-    if not os.path.exists(bert_config):
-        print("📥 Laster ned PL-BERT (viktig for StyleTTS2)...")
-        url = "https://github.com/yl4579/StyleTTS2/releases/download/v1.0/bert.zip"
-        zip_path = "bert.zip"
+    plbert_dir = os.path.join(UTILS_DIR, "PLBERT")
+    os.makedirs(plbert_dir, exist_ok=True)
+    
+    # Dette er de to filene som lå inni bert.zip
+    files_to_download = {
+        "config.json": "https://huggingface.co/yl4579/StyleTTS2-LibriTTS/resolve/main/Utils/PLBERT/config.json",
+        "step_1000000.t7": "https://huggingface.co/yl4579/StyleTTS2-LibriTTS/resolve/main/Utils/PLBERT/step_1000000.t7"
+    }
+    
+    print("📥 Laster ned PL-BERT filer fra Hugging Face (ingen zip-tull)...")
+    
+    for filename, url in files_to_download.items():
+        file_path = os.path.join(plbert_dir, filename)
         
-        try:
-            # Fake en User-Agent for å unngå HTTP 404 fra GitHub
-            req = urllib.request.Request(
-                url, 
-                data=None, 
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-                }
-            )
-            
-            print(f"   Laster ned fra {url}...")
-            with urllib.request.urlopen(req) as response, open(zip_path, 'wb') as out_file:
-                shutil.copyfileobj(response, out_file)
-            
-            print("   Pakker ut...")
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(UTILS_DIR)
-                
-            if os.path.exists(zip_path):
-                os.remove(zip_path)
-                
-            print("✅ PL-BERT installert korrekt!")
-            
-        except Exception as e:
-            print(f"❌ Feil under nedlasting av BERT: {e}")
-            sys.exit(1)
-    else:
-        print("✅ PL-BERT fantes allerede.")
+        # Sjekk størrelse for å se om vi har en korrupt fil (viktig!)
+        if os.path.exists(file_path):
+            if os.path.getsize(file_path) < 1000: # Hvis filen er mistenkelig liten (f.eks feilmelding)
+                print(f"   ⚠️  Filen {filename} ser ødelagt ut. Laster ned på nytt.")
+                os.remove(file_path)
+        
+        if not os.path.exists(file_path):
+            print(f"   Laster ned {filename}...")
+            try:
+                urllib.request.urlretrieve(url, file_path)
+            except Exception as e:
+                print(f"❌ Feil ved nedlasting av {filename}: {e}")
+                sys.exit(1)
+        else:
+            print(f"   {filename} er allerede på plass.")
+
+    print("✅ PL-BERT installert korrekt!")
 
 if __name__ == "__main__":
     prepare_data()
