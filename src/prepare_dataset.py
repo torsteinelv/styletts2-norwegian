@@ -22,7 +22,13 @@ def prepare_data():
     os.makedirs(OUTPUT_WAV_DIR, exist_ok=True)
     
     # Last datasett (streamer for hastighet)
-    ds = load_dataset("NbAiLab/NPSC", "16K_mp3_bokmaal", split="train", streaming=True)
+    ds = load_dataset(
+        "NbAiLab/NPSC", 
+        "16K_mp3_bokmaal", 
+        split="train", 
+        streaming=True, 
+        trust_remote_code=True  # <--- LEGG TIL DENNE!
+    )
     
     data_entries = []
     total_duration = 0
