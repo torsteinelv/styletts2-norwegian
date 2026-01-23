@@ -1,0 +1,35 @@
+log_dir: "Models/NorskStyle"
+save_freq: 2
+device: "cuda"
+epochs: 20  # StyleTTS2 lærer fort! 20 epoker er ofte nok for finetuning.
+batch_size: 4
+pretrained_model: "" 
+load_only_params: false
+fp16_run: true
+
+train_data: "Data/train_list.txt"
+val_data: "Data/val_list.txt"
+root_path: "Data/wavs"
+
+preprocess_params:
+  sr: 24000
+  spect_params:
+    n_fft: 2048
+    win_length: 1200
+    hop_length: 300
+
+model_params:
+  dim_in: 64
+  hidden_dim: 512
+  max_conv_dim: 512
+  n_layer: 3
+  n_mels: 80
+  dropout: 0.2
+
+loss_params:
+  lambda_mel: 5.0
+  lambda_gen: 1.0
+  lambda_slm: 1.0
+  
+optimizer_params:
+  lr: 0.0001
