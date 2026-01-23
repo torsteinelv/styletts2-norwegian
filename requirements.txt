@@ -16,3 +16,4 @@ einops
 einops-exts
 typing_extensions
 tensorboard
+Cython>=0.29.0
