@@ -7,7 +7,7 @@ transformers
 accelerate
 matplotlib
 pyyaml
-munidecode
+unidecode
 huggingface_hub
 datasets
 nltk
