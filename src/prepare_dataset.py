@@ -6,10 +6,13 @@ from datasets import load_dataset
 from tqdm import tqdm
 import random
 import sys
+import urllib.request
+import zipfile
+import shutil
 
 # --- KONFIGURASJON ---
-# ENDRE DENNE til navnet på din favoritt-taler!
-# Forslag: "Anniken Huitfeldt", "Jonas Gahr Støre", "Erna Solberg", "Trine Skei Grande"
+# ENDRE DENNE hvis du vil bytte person.
+# Gode alternativer: "Anniken Huitfeldt", "Jonas Gahr Støre", "Erna Solberg"
 TARGET_SPEAKER = "Anniken Huitfeldt" 
 
 # Stier inne i Docker-containeren
@@ -23,7 +26,9 @@ SAMPLE_RATE = 24000
 def prepare_data():
     print(f"🚀 Starter forberedelse for stemmen: {TARGET_SPEAKER}")
     
+    # Lag mapper hvis de ikke finnes
     os.makedirs(OUTPUT_WAV_DIR, exist_ok=True)
+    os.makedirs("/app/Data", exist_ok=True)
     
     print("⏳ Kobler til NPSC-datasettet (Streaming)...")
     
@@ -38,6 +43,7 @@ def prepare_data():
         )
     except Exception as e:
         print(f"❌ Kunne ikke laste datasett: {e}")
+        print("   Tips: Sjekk at 'datasets==2.19.0' er i requirements.txt")
         sys.exit(1)
     
     data_entries = []
@@ -47,7 +53,7 @@ def prepare_data():
     print("⏳ Laster ned, analyserer og konverterer lydfiler...")
     print("   (Dette kan ta litt tid før fremdriftsbaren starter ordentlig)")
 
-    # Vi setter en maks grense på 2.5 timer med lyd (nok for StyleTTS2)
+    # Vi setter en maks grense på ca 2.5 timer med lyd (nok for finetuning)
     MAX_DURATION_SECONDS = 9000 
     
     for i, row in enumerate(tqdm(ds)):
@@ -73,7 +79,7 @@ def prepare_data():
             continue
 
         # Filtrer vekk støy (veldig korte) og monologer (veldig lange)
-        # StyleTTS2 liker setninger på 2-12 sekunder best.
+        # StyleTTS2 liker setninger på 1.5 - 12 sekunder best.
         if duration_seconds < 1.5 or duration_seconds > 12.0:
             continue
             
@@ -84,7 +90,6 @@ def prepare_data():
             audio_array = librosa.resample(audio_array, orig_sr=orig_sr, target_sr=SAMPLE_RATE)
             
         # Normaliser volum (viktig for jevn lyd!)
-        # Dette sikrer at lyden ligger mellom -1.0 og 1.0
         max_val = np.max(np.abs(audio_array))
         if max_val > 0:
             audio_array = audio_array / max_val
@@ -99,14 +104,13 @@ def prepare_data():
         text = row["text"].replace("|", "").strip()
         
         # Format: "filnavn.wav | tekst | speaker_id"
-        # Vi bruker speaker_id 0 siden vi trener en single-speaker modell
         entry = f"{filename}|{text}|0"
         data_entries.append(entry)
         
         total_duration += duration_seconds
         processed_count += 1
         
-        # Print status hver 50. fil så du ser at det skjer noe i loggen
+        # Print status hver 50. fil
         if processed_count % 50 == 0:
             print(f"   --> Prosessert {processed_count} filer ({total_duration/60:.1f} minutter totalt)")
 
@@ -134,14 +138,38 @@ def prepare_data():
     print(f"📝 Lagret {len(train_data)} linjer til train_list.txt")
     print(f"📝 Lagret {len(val_data)} linjer til val_list.txt")
 
-    # --- LAST NED HJELPEMODELL (PL-BERT) ---
-    print("📥 Laster ned PL-BERT (viktig for StyleTTS2)...")
-    # Vi sjekker om den allerede finnes for å spare tid
-    if not os.path.exists("Utils/PLBERT/config.json"):
-        os.system("wget -q https://github.com/yl4579/StyleTTS2/releases/download/v1.0/bert.zip")
-        os.system("unzip -o -q bert.zip -d Utils/")
-        os.system("rm bert.zip")
-        print("✅ PL-BERT installert.")
+    # --- FIX 3: LAST NED PL-BERT (PYTHON NATIVE) ---
+    # Vi bruker Python biblioteker i stedet for os.system/wget for å være trygge
+    bert_dir = "/app/Utils/PLBERT"
+    bert_config = os.path.join(bert_dir, "config.json")
+    
+    if not os.path.exists(bert_config):
+        print("📥 Laster ned PL-BERT (viktig for StyleTTS2)...")
+        url = "https://github.com/yl4579/StyleTTS2/releases/download/v1.0/bert.zip"
+        zip_path = "bert.zip"
+        
+        try:
+            # Sørg for at mappen Utils eksisterer
+            os.makedirs("/app/Utils", exist_ok=True)
+            
+            # 1. Last ned
+            print(f"   Laster ned fra {url}...")
+            urllib.request.urlretrieve(url, zip_path)
+            
+            # 2. Pakk ut
+            print("   Pakker ut...")
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall("/app/Utils")
+                
+            # 3. Rydd opp
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
+                
+            print("✅ PL-BERT installert korrekt!")
+            
+        except Exception as e:
+            print(f"❌ Feil under nedlasting av BERT: {e}")
+            # Vi stopper ikke her, i tilfelle filene faktisk ble pakket ut delvis
     else:
         print("✅ PL-BERT fantes allerede.")
 
