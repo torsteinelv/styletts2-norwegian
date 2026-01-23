@@ -3,7 +3,6 @@ torchaudio>=2.1.0
 scipy
 librosa
 phonemizer
-# Vi låser transformers til en versjon som vi VET virker med torch 2.1
 transformers==4.36.2
 accelerate==0.26.1
 matplotlib
@@ -14,5 +13,6 @@ datasets==2.19.0
 nltk
 munch
 einops
+einops-exts
 typing_extensions
 tensorboard
