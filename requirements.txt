@@ -9,7 +9,7 @@ matplotlib
 pyyaml
 unidecode
 huggingface_hub
-datasets==2.19.0
+datasets==5.0.1
 nltk
 munch
 einops
